@@ -1,0 +1,158 @@
+using System;
+using System.Drawing;
+using System.Windows.Forms;
+using AForge.Video;
+using AForge.Video.DirectShow;
+using ZXing;
+
+namespace Scanner
+{
+    public partial class Form1 : Form
+    {
+        private FilterInfoCollection cameras;
+        private VideoCaptureDevice camera;
+        private bool isCameraMode = false;
+        private bool isScanning = false;
+
+        public Form1()
+        {
+            InitializeComponent();
+
+            // Setup mode options
+            cmbMode.Items.Add("Camera");
+            cmbMode.Items.Add("Scanner");
+            cmbMode.SelectedIndex = 0; // default to camera
+            txtBarcodeInput.Visible = false;
+
+            lblStatus.Text = "Status: Stopped";
+            lblStatus.ForeColor = Color.IndianRed;
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+
+        }
+
+        private void btnStart_Click(object sender, EventArgs e)
+        {
+            string mode = cmbMode.SelectedItem.ToString();
+            if (mode == "Camera")
+            {
+                StartCameraMode();
+            }
+            else
+            {
+                StartScannerMode();
+            }
+        }
+            private void StartCameraMode()
+            {
+            try
+            {
+                cameras = new FilterInfoCollection(FilterCategory.VideoInputDevice);
+
+                if (cameras.Count == 0)
+                {
+                    MessageBox.Show("No camera found!");
+                    return;
+                }
+
+                camera = new VideoCaptureDevice(cameras[0].MonikerString);
+                camera.NewFrame += Camera_NewFrame;
+                camera.Start();
+
+                pictureBoxCamera.Visible = true;
+                txtBarcodeInput.Visible = false;
+
+                isCameraMode = true;
+                isScanning = true;
+                lblStatus.Text = "Status: Scanning (Camera)...";
+                lblStatus.ForeColor = Color.SeaGreen;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error starting camera: " + ex.Message);
+            }
+        }
+
+        private void StartScannerMode()
+        {
+            // no camera; wait for scanner input
+            pictureBoxCamera.Visible = false;
+            txtBarcodeInput.Visible = true;
+            txtBarcodeInput.Focus();
+
+            isCameraMode = false;
+            isScanning = true;
+            lblStatus.Text = "Status: Waiting for Scanner...";
+            lblStatus.ForeColor = Color.SteelBlue;
+        }
+
+        private void Camera_NewFrame(object sender, NewFrameEventArgs eventArgs)
+        {
+            try
+            {
+                Bitmap frame = (Bitmap)eventArgs.Frame.Clone();
+
+                pictureBoxCamera.Invoke(new MethodInvoker(delegate
+                {
+                    pictureBoxCamera.Image?.Dispose();
+                    pictureBoxCamera.Image = (Bitmap)frame.Clone();
+                }));
+
+                using (var temp = (Bitmap)frame.Clone())
+                {
+                    BarcodeReader reader = new BarcodeReader();
+                    var result = reader.Decode(temp);
+                    if (result != null)
+                    {
+                        txtResult.Invoke(new MethodInvoker(delegate
+                        {
+                            txtResult.Text = result.Text;
+                        }));
+                    }
+                }
+
+                frame.Dispose();
+            }
+            catch
+            {
+                // ignore errors during stop
+            }
+        }
+
+        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            StopAll();
+        }
+
+        private void btnStop_Click(object sender, EventArgs e)
+        {
+            StopAll();
+        }
+        private void StopAll()
+        {
+            if (camera != null && camera.IsRunning)
+            {
+                camera.SignalToStop();
+                camera.WaitForStop();
+                pictureBoxCamera.Image = null;
+            }
+
+            isScanning = false;
+            lblStatus.Text = "Status: Stopped";
+            lblStatus.ForeColor = Color.IndianRed;
+        }
+
+        private void textBox1_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter && isScanning)
+            {
+                string code = txtBarcodeInput.Text.Trim();
+                txtResult.Text = code;
+                txtBarcodeInput.Clear();
+                e.SuppressKeyPress = true;
+            }
+        }
+    }
+}
